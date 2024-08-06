@@ -5,14 +5,14 @@ import numpy as np
 image = cv2.imread(r"C:\Users\yff76\Lecture Document\DSC_1096.JPG")
 
 # 画像の縮小
-scale_percent = 30  # 画像を50%のサイズに縮小
+scale_percent = 30  # 画像を30%のサイズに縮小
 width = int(image.shape[1] * scale_percent / 100)
 height = int(image.shape[0] * scale_percent / 100)
 dim = (width, height)
 resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
 
 # カラー空間の変換 (BGR to HSV)
-hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
 
 # 白色のマスクを作成
 lower_white = np.array([0, 0, 200])
@@ -20,7 +20,7 @@ upper_white = np.array([180, 50, 255])
 mask = cv2.inRange(hsv, lower_white, upper_white)
 
 # 白色部分の抽出
-result = cv2.bitwise_and(image, image, mask=mask)
+result = cv2.bitwise_and(resized, resized, mask=mask)
 
 # グレースケール変換
 gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
@@ -28,11 +28,26 @@ gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
 # 前処理 - ヒストグラム均等化
 equalized = cv2.equalizeHist(gray)
 
+# ぼやかし処理（ガウスぼかし）
+blurred = cv2.GaussianBlur(equalized, (5, 5), 0)
+
 # エッジ検出
-edges = cv2.Canny(equalized, 50, 150)
+edges = cv2.Canny(blurred, 50, 150)
 
 # 直線検出 (Hough変換)
 lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, minLineLength=100, maxLineGap=10)
+
+# 直線検出結果の画像を作成
+line_image = resized.copy()
+if lines is not None:
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        cv2.line(line_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+# 直線検出結果の画像を表示
+cv2.imshow('Detected Lines', line_image)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
 
 def find_rectangles(lines):
     rectangles = []
@@ -74,7 +89,6 @@ rectangles_coordinates = []
 
 for rect in filtered_rectangles:
     p1, p2 = rect
-    cv2.rectangle(resized, p1, p2, (255, 0, 0), 2)
     rectangles_coordinates.append((p1, p2))
 
 def calculate_average_coordinates(rectangles_coords):
@@ -129,8 +143,20 @@ grouped_rectangles = group_rectangles_by_distance(rectangles_coordinates, distan
 # 各グループの平均座標を計算
 average_coordinates_per_group = [calculate_average_coordinates(group) for group in grouped_rectangles]
 
-# 結果を表示
-cv2.imshow('Filtered Rectangles', resized)
+# 長方形を描画し、番号付きの赤い点も描画
+output_image = resized.copy()
+if filtered_rectangles:
+    for rect in filtered_rectangles:
+        p1, p2 = rect
+        cv2.rectangle(output_image, p1, p2, (255, 0, 0), 2)
+
+# 各グループの平均座標を描画
+for i, avg_coords in enumerate(average_coordinates_per_group):
+    if avg_coords:
+        cv2.circle(output_image, (int(avg_coords[0]), int(avg_coords[1])), 5, (0, 0, 255), -1)
+        cv2.putText(output_image, str(i+1), (int(avg_coords[0]), int(avg_coords[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+cv2.imshow('Filtered Rectangles with Average Points', output_image)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
 
