@@ -3,9 +3,9 @@ import numpy as np
 import cv2
 import os
 
-HOST = "192.168.179.12"  # Raspberry Pi IP address
+HOST = "your IP adress"  # Raspberry Pi IP address
 PORT = 5569
-SAVE_DIR = r"C:\Users\yff76\Lecture Document\Capture"  # Directory to save images
+SAVE_DIR = r"your file"  # Directory to save images
 
 # Create the directory if it doesn't exist
 if not os.path.exists(SAVE_DIR):
