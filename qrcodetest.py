@@ -5,8 +5,8 @@ import numpy as np
 # initial
 # -----------------------------------------------------------
 font = cv2.FONT_HERSHEY_SIMPLEX
-FILE_PNG_AB = r"C:\Users\yff76\Lecture Document\testqr3.JPG"
-SCALE_PERCENT = 10  # 画像サイズを50%に縮小
+FILE_PNG_AB = r"C:\Users\yff76\Lecture Document\testqr5.JPG"
+SCALE_PERCENT = 50  # 画像サイズを50%に縮小
 ZOOM_FACTOR = 2  # QRコードが検出された場所の拡大倍率
 
 # -----------------------------------------------------------
@@ -38,12 +38,11 @@ def preprocess_image(img):
 # function to detect QR codes
 # -----------------------------------------------------------
 def function_qrdec_cv2(img_bgr):
-    preprocessed_img = preprocess_image(img_bgr)
     # QRCodeDetectorインスタンス生成
     qrd = cv2.QRCodeDetector()
 
     # QRコードデコード
-    retval, decoded_info, points, straight_qrcode = qrd.detectAndDecodeMulti(preprocessed_img)
+    retval, decoded_info, points, straight_qrcode = qrd.detectAndDecodeMulti(img_bgr)
 
     if retval:
         points = points.astype(np.int32)  # Change np.int to np.int32
@@ -63,11 +62,21 @@ def function_qrdec_cv2(img_bgr):
                 dec_inf_shiftjis = dec_inf
 
             print('dec:', dec_inf_shiftjis)
+            # QRコードの座標を出力
+            print('QRコードの座標:')
+            for coord in point:
+                print(f'({coord[0]}, {coord[1]})')
+
             # OpenCVのputText関数を使って日本語を画像に描画する
             img_bgr = cv2.putText(img_bgr, dec_inf_shiftjis, (x, y-6), font, .6, (0, 0, 255), 2, cv2.LINE_AA)
 
             # バウンディングボックス
             img_bgr = cv2.polylines(img_bgr, [point], True, (0, 255, 0), 2, cv2.LINE_AA)
+
+            # QRコードの中心に円を描く
+            center_x = int(np.mean(point[:, 0]))
+            center_y = int(np.mean(point[:, 1]))
+            img_bgr = cv2.circle(img_bgr, (center_x, center_y), 5, (255, 0, 0), -1)
 
             # QRコードがある部分を拡大して表示
             min_x = np.min(point[:, 0])
