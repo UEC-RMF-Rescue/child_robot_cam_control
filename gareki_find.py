@@ -1,8 +1,7 @@
 import cv2
 import numpy as np
-from sklearn.cluster import DBSCAN
 
-def detect_cuboids(image_path, scale_percent=50, min_area=2000, proximity_threshold=50, output_scale_percent=50, overlap_threshold=0.5):
+def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=10, overlap_threshold=0.5):
     # 画像を読み込む
     image = cv2.imread(image_path)
     
@@ -14,37 +13,43 @@ def detect_cuboids(image_path, scale_percent=50, min_area=2000, proximity_thresh
     resized_image = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
     gray = cv2.cvtColor(resized_image, cv2.COLOR_BGR2GRAY)
     
-    # エッジ検出
-    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    # Canny エッジ検出
+    low_threshold = 50
+    high_threshold = 200
+    edges = cv2.Canny(gray, low_threshold, high_threshold, apertureSize=3)
     
-    # 直線検出
-    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, minLineLength=50, maxLineGap=10)
+    # Hough 変換で直線検出
+    min_line_length = 100
+    max_line_gap = 10
+    lines = cv2.HoughLines(edges, 1, np.pi / 180, 100)
     
     if lines is not None:
+        # 各直線を表示
         lines = np.array([line[0] for line in lines])
-    
-        # 直線を画像に描画
-        for line in lines:
-            x1, y1, x2, y2 = line
-            cv2.line(resized_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        
-        # 直線が集中している領域を見つけるための画像を作成
         line_density = np.zeros_like(gray, dtype=np.float32)
-        for line in lines:
-            x1, y1, x2, y2 = line
+        
+        for rho, theta in lines:
+            a = np.cos(theta)
+            b = np.sin(theta)
+            x0 = a * rho
+            y0 = b * rho
+            x1 = int(x0 + 1000 * (-b))
+            y1 = int(y0 + 1000 * (a))
+            x2 = int(x0 - 1000 * (-b))
+            y2 = int(y0 - 1000 * (a))
             cv2.line(line_density, (x1, y1), (x2, y2), 1, 1)
         
-        # 直線の密度を計算し、閾値を超えるエリアを検出
-        _, binary_density = cv2.threshold(line_density, 0.5, 255, cv2.THRESH_BINARY)
+        # 線密度を計算し、閾値を超えるエリアを検出
+        density_map = np.clip(line_density, 0, 1)
+        _, binary_density = cv2.threshold(density_map, 0.5, 255, cv2.THRESH_BINARY)
         contours, _ = cv2.findContours(binary_density.astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         
         rectangles = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area > min_area:  # 大きさのフィルタリング
+            if area > 500:
                 x, y, w, h = cv2.boundingRect(cnt)
                 rectangles.append((x, y, x+w, y+h))
-                # 長方形の描画
                 cv2.rectangle(resized_image, (x, y), (x+w, y+h), (0, 0, 255), 2)
         
         def calculate_overlap(rect1, rect2):
@@ -84,40 +89,31 @@ def detect_cuboids(image_path, scale_percent=50, min_area=2000, proximity_thresh
             cy = (y1 + y2) // 2
             centers.append((cx, cy))
             
-            # 統合された長方形の描画
             cv2.rectangle(resized_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
         
         if centers:
-            # DBSCANで近くの中心をまとめる
-            centers_np = np.array(centers)
-            clustering = DBSCAN(eps=proximity_threshold, min_samples=1).fit(centers_np)
-            labels = clustering.labels_
-            
-            unique_labels = np.unique(labels)
-            for idx, label in enumerate(unique_labels):
-                cluster_points = centers_np[labels == label]
-                cluster_center = np.mean(cluster_points, axis=0).astype(int)
+            for idx, center in enumerate(centers):
+                cx, cy = center
+                cv2.circle(resized_image, (cx, cy), 7, (0, 0, 255), -1)
+                cv2.putText(resized_image, f"{idx+1}", (cx - 15, cy + 15), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+                cv2.putText(resized_image, f"({cx}, {cy})", (cx + 20, cy + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 
-                # 点に番号を振る
-                cv2.circle(resized_image, tuple(cluster_center), 7, (0, 0, 255), -1)
-                cv2.putText(resized_image, f"{idx+1}", (cluster_center[0] - 15, cluster_center[1] + 15), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
-                cv2.putText(resized_image, f"({cluster_center[0]}, {cluster_center[1]})", (cluster_center[0] + 20, cluster_center[1] + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                
-                # 座標をコンソールに出力
-                print(f"Detected combined cuboid with center at ({cluster_center[0]}, {cluster_center[1]})")
-
-    # 出力画像の縮小
+                print(f"Detected combined rectangle with center at ({cx}, {cy})")
+    
+    density_color_map = cv2.applyColorMap((line_density * 255).astype(np.uint8), cv2.COLORMAP_JET)
+    
     output_width = int(resized_image.shape[1] * output_scale_percent / 100)
     output_height = int(resized_image.shape[0] * output_scale_percent / 100)
     output_dim = (output_width, output_height)
     
     output_image = cv2.resize(resized_image, output_dim, interpolation=cv2.INTER_AREA)
+    density_map_resized = cv2.resize(density_color_map, output_dim, interpolation=cv2.INTER_AREA)
     
-    # 画像を表示
-    cv2.imshow('Detected Cuboids', output_image)
+    cv2.imshow('Detected Rectangles and Coordinates', output_image)
+    cv2.imshow('Line Density Map', density_map_resized)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 # 画像ファイルのパスを指定
 image_path = r"C:\Users\yff76\Lecture Document\DSC_1146.JPG"
-detect_cuboids(image_path, scale_percent=50, min_area=2000, proximity_threshold=50, output_scale_percent=50, overlap_threshold=0.5)
+detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=10, overlap_threshold=0.5)
