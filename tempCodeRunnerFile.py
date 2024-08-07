@@ -1,123 +1,125 @@
-import cv2
 import numpy as np
+import cv2
 
-# -----------------------------------------------------------
-# initial
-# -----------------------------------------------------------
-font = cv2.FONT_HERSHEY_SIMPLEX
-FILE_PNG_AB = r"C:\Users\yff76\Lecture Document\DSC_1151.JPG"
-SCALE_PERCENT = 50  # 画像サイズを50%に縮小
-ZOOM_FACTOR = 2  # QRコードが検出された場所の拡大倍率
-SHOW_SCALE_PERCENT = 25  # 最終画像を縮小表示する倍率
-ROTATION_ANGLES = [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180,]
-
-# -----------------------------------------------------------
-# function to compress image
-# -----------------------------------------------------------
-def compress_image(img, scale_percent):
-    width = int(img.shape[1] * scale_percent / 100)
-    height = int(img.shape[0] * scale_percent / 100)
+def detect_lines_and_transform(image_path, scale_percent=50, output_scale_percent=50, top_n=3):
+    # 画像を読み込む
+    image = cv2.imread(image_path)
+    
+    # 画像のサイズを縮小
+    width = int(image.shape[1] * scale_percent / 100)
+    height = int(image.shape[0] * scale_percent / 100)
     dim = (width, height)
-    resized_img = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
-    return resized_img
-
-# -----------------------------------------------------------
-# function to preprocess image
-# -----------------------------------------------------------
-def preprocess_image(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    equalized = cv2.equalizeHist(gray)
-    blurred = cv2.GaussianBlur(equalized, (5, 5), 0)
-    edged = cv2.Canny(blurred, 50, 150)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    morphed = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel)
-    return morphed
-
-# -----------------------------------------------------------
-# function to rotate image
-# -----------------------------------------------------------
-def rotate_image(img, angle):
-    (h, w) = img.shape[:2]
-    (cX, cY) = (w // 2, h // 2)
-    M = cv2.getRotationMatrix2D((cX, cY), angle, 1.0)
-    rotated = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-    return rotated
-
-# -----------------------------------------------------------
-# function to detect QR codes
-# -----------------------------------------------------------
-def function_qrdec_cv2(img_bgr):
-    qrd = cv2.QRCodeDetector()
-    retval, decoded_info, points, _ = qrd.detectAndDecodeMulti(img_bgr)
-    qr_codes = []
-    if retval:
-        points = np.array(points)
-        for dec_inf, point in zip(decoded_info, points):
-            if dec_inf == '':
-                continue
-            point = point.astype(np.int32)
-            center_x = int(np.mean(point[:, 0]))
-            center_y = int(np.mean(point[:, 1]))
-            qr_codes.append((dec_inf, center_x, center_y, point))
-    return qr_codes
-
-# -----------------------------------------------------------
-# function to annotate image with QR codes
-# -----------------------------------------------------------
-def annotate_image(img, qr_codes):
-    for dec_inf, center_x, center_y, point in qr_codes:
-        try:
-            dec_inf_shiftjis = dec_inf.encode('latin1').decode('shift_jis')
-        except UnicodeDecodeError:
-            dec_inf_shiftjis = dec_inf
-        print('QRコードの内容:', dec_inf_shiftjis)
-        print(f'QRコードの中心座標: ({center_x}, {center_y})')
-        x = point[0][0]
-        y = point[0][1]
-        img = cv2.putText(img, dec_inf_shiftjis, (x, y-6), font, .6, (0, 0, 255), 2, cv2.LINE_AA)
-        img = cv2.polylines(img, [point], True, (0, 255, 0), 2, cv2.LINE_AA)
-        img = cv2.circle(img, (center_x, center_y), 5, (255, 0, 0), -1)
-    return img
-
-# -----------------------------------------------------------
-# function to resize and display image
-# -----------------------------------------------------------
-def resize_and_display(img, scale_percent):
-    width = int(img.shape[1] * scale_percent / 100)
-    height = int(img.shape[0] * scale_percent / 100)
-    dim = (width, height)
-    resized_img = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
-    cv2.imshow('Resized Image', resized_img)
+    
+    resized_image = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(resized_image, cv2.COLOR_BGR2GRAY)
+    
+    # Canny エッジ検出
+    low_threshold = 50   # 閾値を緩くする
+    high_threshold = 150 # 閾値を緩くする
+    edges = cv2.Canny(gray, low_threshold, high_threshold, apertureSize=3)
+    
+    # Hough 変換で直線検出
+    min_line_length = 50  # 最小線長を減らす
+    max_line_gap = 20     # 最大線ギャップを増やす
+    threshold = 50        # 最小票数を減らす
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold, minLineLength=min_line_length, maxLineGap=max_line_gap)
+    
+    line_density = np.zeros_like(gray, dtype=np.float32)
+    
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            cv2.line(line_density, (x1, y1), (x2, y2), 1, 1)
+        
+        # 線密度を計算し、閾値を超えるエリアを検出
+        density_map = np.clip(line_density, 0, 1)
+        _, binary_density = cv2.threshold(density_map, 0.5, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(binary_density.astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        
+        rectangles = []
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area > 100:
+                x, y, w, h = cv2.boundingRect(cnt)
+                rectangles.append((x, y, x+w, y+h))
+        
+        def is_overlapping(rect1, rect2):
+            x1, y1, x2, y2 = rect1
+            x3, y3, x4, y4 = rect2
+            return not (x2 < x3 or x4 < x1 or y2 < y3 or y4 < y1)
+        
+        def merge_rectangles(rect_list):
+            merged = []
+            while rect_list:
+                rect = rect_list.pop(0)
+                merge_group = [rect]
+                for other in rect_list[:]:
+                    if is_overlapping(rect, other):
+                        merge_group.append(other)
+                        rect_list.remove(other)
+                x1 = min([r[0] for r in merge_group])
+                y1 = min([r[1] for r in merge_group])
+                x2 = max([r[2] for r in merge_group])
+                y2 = max([r[3] for r in merge_group])
+                merged.append((x1, y1, x2, y2))
+            return merged
+        
+        merged_rectangles = merge_rectangles(rectangles)
+        
+        # 高密度エリアをソート
+        merged_rectangles.sort(key=lambda r: (r[2]-r[0]) * (r[3]-r[1]), reverse=True)
+        
+        centers = []
+        for idx, rect in enumerate(merged_rectangles[:top_n]):
+            x1, y1, x2, y2 = rect
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+            centers.append((cx, cy))
+            
+            # 上位3エリアに異なる色を付ける
+            color = (0, 255, 0) if idx == 0 else (255, 0, 0) if idx == 1 else (0, 0, 255)
+            cv2.rectangle(resized_image, (x1, y1), (x2, y2), color, 2)
+        
+        if centers:
+            for idx, center in enumerate(centers):
+                cx, cy = center
+                cv2.circle(resized_image, (cx, cy), 7, (0, 0, 255), -1)
+                cv2.putText(resized_image, f"{idx+1}", (cx - 15, cy + 15), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+                cv2.putText(resized_image, f"({cx}, {cy})", (cx + 20, cy + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                
+                # 画像座標から実座標に変換
+                pts_image = np.array([[cx, cy]], dtype=np.float32)
+                pts_image = np.array([pts_image])
+                pts_real = cv2.perspectiveTransform(pts_image, M)
+                
+                real_x, real_y = pts_real[0][0]
+                print(f"Detected combined rectangle with center at image coordinates ({cx}, {cy})")
+                print(f"Real world coordinates: ({real_x:.2f}, {real_y:.2f})")
+    
+    else:
+        print("No lines detected")
+    
+    density_color_map = cv2.applyColorMap((line_density * 255).astype(np.uint8), cv2.COLORMAP_JET)
+    
+    output_width = int(resized_image.shape[1] * output_scale_percent / 100)
+    output_height = int(resized_image.shape[0] * output_scale_percent / 100)
+    output_dim = (output_width, output_height)
+    
+    output_image = cv2.resize(resized_image, output_dim, interpolation=cv2.INTER_AREA)
+    density_map_resized = cv2.resize(density_color_map, output_dim, interpolation=cv2.INTER_AREA)
+    
+    cv2.imshow('Detected Rectangles and Coordinates', output_image)
+    cv2.imshow('Line Density Map', density_map_resized)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-# -----------------------------------------------------------
-# sample program
-# -----------------------------------------------------------
-img_BGR = cv2.imread(FILE_PNG_AB, cv2.IMREAD_COLOR)
-if img_BGR is not None:
-    resized_img_BGR = compress_image(img_BGR, SCALE_PERCENT)
-    all_qr_codes = []
-    for angle in ROTATION_ANGLES:
-        rotated_img = rotate_image(resized_img_BGR, angle)
-        qr_codes = function_qrdec_cv2(rotated_img)
-        all_qr_codes.extend(qr_codes)
-    # Average positions of QR codes if the same QR code is detected multiple times
-    unique_qr_codes = {}
-    for dec_inf, center_x, center_y, point in all_qr_codes:
-        if dec_inf in unique_qr_codes:
-            unique_qr_codes[dec_inf].append((center_x, center_y, point))
-        else:
-            unique_qr_codes[dec_inf] = [(center_x, center_y, point)]
-    final_qr_codes = []
-    for dec_inf, values in unique_qr_codes.items():
-        avg_x = int(np.mean([v[0] for v in values]))
-        avg_y = int(np.mean([v[1] for v in values]))
-        point = values[0][2]  # Use points from the first occurrence
-        final_qr_codes.append((dec_inf, avg_x, avg_y, point))
-    # Annotate the image with final QR code positions
-    annotated_img = annotate_image(resized_img_BGR, final_qr_codes)
-    # 最終画像を縮小表示
-    resize_and_display(annotated_img, SHOW_SCALE_PERCENT)
-else:
-    print(f"Error: Unable to read image {FILE_PNG_AB}")
+# 射影変換のための座標
+pts1 = np.array([(171, 275), (434, 272), (63, 397), (488, 405)], dtype=np.float32)
+pts2 = np.array([(-434, 1520), (175, 1520), (-434, 912), (175, 912)], dtype=np.float32)
+
+# 射影行列の取得
+M = cv2.getPerspectiveTransform(pts1, pts2)
+
+# 画像ファイルのパスを指定
+image_path = r"C:\Users\yff76\Lecture Document\photo_11.jpg"
+detect_lines_and_transform(image_path, scale_percent=50, output_scale_percent=50)

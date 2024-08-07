@@ -1,7 +1,7 @@
-import cv2
 import numpy as np
+import cv2
 
-def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=3, distance_threshold=50):
+def detect_lines_and_transform(image_path, scale_percent=50, output_scale_percent=50, top_n=3):
     # 画像を読み込む
     image = cv2.imread(image_path)
     
@@ -21,12 +21,12 @@ def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=3,
     # Hough 変換で直線検出
     min_line_length = 50  # 最小線長を減らす
     max_line_gap = 20     # 最大線ギャップを増やす
-    threshold = 100       # 最小票数を減らす
+    threshold = 50        # 最小票数を減らす
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold, minLineLength=min_line_length, maxLineGap=max_line_gap)
     
+    line_density = np.zeros_like(gray, dtype=np.float32)
+    
     if lines is not None:
-        line_density = np.zeros_like(gray, dtype=np.float32)
-        
         for line in lines:
             x1, y1, x2, y2 = line[0]
             cv2.line(line_density, (x1, y1), (x2, y2), 1, 1)
@@ -39,7 +39,7 @@ def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=3,
         rectangles = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area > 500:
+            if area > 100:
                 x, y, w, h = cv2.boundingRect(cnt)
                 rectangles.append((x, y, x+w, y+h))
         
@@ -87,7 +87,17 @@ def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=3,
                 cv2.putText(resized_image, f"{idx+1}", (cx - 15, cy + 15), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
                 cv2.putText(resized_image, f"({cx}, {cy})", (cx + 20, cy + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 
-                print(f"Detected combined rectangle with center at ({cx}, {cy})")
+                # 画像座標から実座標に変換
+                pts_image = np.array([[cx, cy]], dtype=np.float32)
+                pts_image = np.array([pts_image])
+                pts_real = cv2.perspectiveTransform(pts_image, M)
+                
+                real_x, real_y = pts_real[0][0]
+                print(f"Detected combined rectangle with center at image coordinates ({cx}, {cy})")
+                print(f"Real world coordinates: ({real_x:.2f}, {real_y:.2f})")
+    
+    else:
+        print("No lines detected")
     
     density_color_map = cv2.applyColorMap((line_density * 255).astype(np.uint8), cv2.COLORMAP_JET)
     
@@ -103,6 +113,13 @@ def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=3,
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
+# 射影変換のための座標
+pts1 = np.array([(171, 275), (434, 272), (63, 397), (488, 405)], dtype=np.float32)
+pts2 = np.array([(-434, 1520), (175, 1520), (-434, 912), (175, 912)], dtype=np.float32)
+
+# 射影行列の取得
+M = cv2.getPerspectiveTransform(pts1, pts2)
+
 # 画像ファイルのパスを指定
-image_path = r"C:\Users\yff76\Lecture Document\test12.jpg"
-detect_lines(image_path, scale_percent=50, output_scale_percent=50, distance_threshold=50)
+image_path = r"C:\Users\yff76\Lecture Document\photo_11.jpg"
+detect_lines_and_transform(image_path, scale_percent=100, output_scale_percent=50)
