@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=10, overlap_threshold=0.5):
+def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=3, distance_threshold=50):
     # 画像を読み込む
     image = cv2.imread(image_path)
     
@@ -14,29 +14,21 @@ def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=10
     gray = cv2.cvtColor(resized_image, cv2.COLOR_BGR2GRAY)
     
     # Canny エッジ検出
-    low_threshold = 50
-    high_threshold = 200
+    low_threshold = 50   # 閾値を緩くする
+    high_threshold = 150 # 閾値を緩くする
     edges = cv2.Canny(gray, low_threshold, high_threshold, apertureSize=3)
     
     # Hough 変換で直線検出
-    min_line_length = 100
-    max_line_gap = 10
-    lines = cv2.HoughLines(edges, 1, np.pi / 180, 100)
+    min_line_length = 50  # 最小線長を減らす
+    max_line_gap = 20     # 最大線ギャップを増やす
+    threshold = 100       # 最小票数を減らす
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold, minLineLength=min_line_length, maxLineGap=max_line_gap)
     
     if lines is not None:
-        # 各直線を表示
-        lines = np.array([line[0] for line in lines])
         line_density = np.zeros_like(gray, dtype=np.float32)
         
-        for rho, theta in lines:
-            a = np.cos(theta)
-            b = np.sin(theta)
-            x0 = a * rho
-            y0 = b * rho
-            x1 = int(x0 + 1000 * (-b))
-            y1 = int(y0 + 1000 * (a))
-            x2 = int(x0 - 1000 * (-b))
-            y2 = int(y0 - 1000 * (a))
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
             cv2.line(line_density, (x1, y1), (x2, y2), 1, 1)
         
         # 線密度を計算し、閾値を超えるエリアを検出
@@ -50,19 +42,11 @@ def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=10
             if area > 500:
                 x, y, w, h = cv2.boundingRect(cnt)
                 rectangles.append((x, y, x+w, y+h))
-                cv2.rectangle(resized_image, (x, y), (x+w, y+h), (0, 0, 255), 2)
         
-        def calculate_overlap(rect1, rect2):
+        def is_overlapping(rect1, rect2):
             x1, y1, x2, y2 = rect1
             x3, y3, x4, y4 = rect2
-            overlap_x1 = max(x1, x3)
-            overlap_y1 = max(y1, y3)
-            overlap_x2 = min(x2, x4)
-            overlap_y2 = min(y2, y4)
-            overlap_area = max(0, overlap_x2 - overlap_x1) * max(0, overlap_y2 - overlap_y1)
-            area1 = (x2 - x1) * (y2 - y1)
-            area2 = (x4 - x3) * (y4 - y3)
-            return overlap_area / min(area1, area2)
+            return not (x2 < x3 or x4 < x1 or y2 < y3 or y4 < y1)
         
         def merge_rectangles(rect_list):
             merged = []
@@ -70,7 +54,7 @@ def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=10
                 rect = rect_list.pop(0)
                 merge_group = [rect]
                 for other in rect_list[:]:
-                    if calculate_overlap(rect, other) > overlap_threshold:
+                    if is_overlapping(rect, other):
                         merge_group.append(other)
                         rect_list.remove(other)
                 x1 = min([r[0] for r in merge_group])
@@ -82,14 +66,19 @@ def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=10
         
         merged_rectangles = merge_rectangles(rectangles)
         
+        # 高密度エリアをソート
+        merged_rectangles.sort(key=lambda r: (r[2]-r[0]) * (r[3]-r[1]), reverse=True)
+        
         centers = []
-        for rect in merged_rectangles:
+        for idx, rect in enumerate(merged_rectangles[:top_n]):
             x1, y1, x2, y2 = rect
             cx = (x1 + x2) // 2
             cy = (y1 + y2) // 2
             centers.append((cx, cy))
             
-            cv2.rectangle(resized_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            # 上位3エリアに異なる色を付ける
+            color = (0, 255, 0) if idx == 0 else (255, 0, 0) if idx == 1 else (0, 0, 255)
+            cv2.rectangle(resized_image, (x1, y1), (x2, y2), color, 2)
         
         if centers:
             for idx, center in enumerate(centers):
@@ -115,5 +104,5 @@ def detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=10
     cv2.destroyAllWindows()
 
 # 画像ファイルのパスを指定
-image_path = r"C:\Users\yff76\Lecture Document\DSC_1146.JPG"
-detect_lines(image_path, scale_percent=50, output_scale_percent=50, top_n=10, overlap_threshold=0.5)
+image_path = r"C:\Users\yff76\Lecture Document\test12.jpg"
+detect_lines(image_path, scale_percent=50, output_scale_percent=50, distance_threshold=50)
