@@ -1,6 +1,11 @@
 import numpy as np
 import cv2
 
+#このプログラムは指定した画像から直線成分を抽出して瓦礫がありそうな場所を最大3つまで出力します。
+#画像上に瓦礫の中心位置と推測できる点と、そのエリアを長方形で描画します。
+#また、線密度の分布も表示します。
+#最後に画像上の瓦礫の位置の座標と実座標に変換した座標を表示します。
+
 def detect_lines_and_transform(image_path, scale_percent=50, output_scale_percent=50, top_n=3):
     # 画像を読み込む
     image = cv2.imread(image_path)
@@ -48,6 +53,7 @@ def detect_lines_and_transform(image_path, scale_percent=50, output_scale_percen
             x3, y3, x4, y4 = rect2
             return not (x2 < x3 or x4 < x1 or y2 < y3 or y4 < y1)
         
+        #隣接長方形をくっつけて大きな瓦礫とする
         def merge_rectangles(rect_list):
             merged = []
             while rect_list:
