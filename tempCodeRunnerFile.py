@@ -1,6 +1,8 @@
 import numpy as np
 import cv2
 
+#QRコードを探索して読み込む。
+
 def detect_lines_and_transform(image_path, scale_percent=50, output_scale_percent=50, top_n=3):
     # 画像を読み込む
     image = cv2.imread(image_path)
