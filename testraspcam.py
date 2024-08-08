@@ -3,6 +3,10 @@ import numpy as np
 import cv2
 import os
 
+#このプログラムはキーを押したら写真が取れます。10回まで取れます。
+#画像の保存場所は自由に指定できます。
+#ラズパイに入っている方から画像を受け取って保存します。
+
 HOST = "your IP adress"  # Raspberry Pi IP address
 PORT = 5569
 SAVE_DIR = r"your file"  # Directory to save images
